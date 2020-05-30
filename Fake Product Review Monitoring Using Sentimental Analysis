@@ -1,0 +1,476 @@
+from datetime import datetime
+start_time = datetime.now()
+import pandas as pd
+import numpy as np
+# wordnet is the database of English language
+# stopwords for removing it from review
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+# ngrams used for bigram input
+import string
+import math
+# importing Linear SVM Classifier 
+from sklearn.svm import LinearSVC
+from nltk.classify import SklearnClassifier
+from sklearn.pipeline import Pipeline
+# evaluation measures
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import accuracy_score
+# for plots and visualizations
+import matplotlib.pyplot as plt
+
+import warnings
+warnings.filterwarnings("ignore")
+
+#universal variable declaration
+dataset = []
+# variable declaration for only review as the feature input
+trainData = []
+testData = []
+trainData_label = []
+testData_label = []
+
+# variable declaration for All the feature input
+trainDataAll = []
+testDataAll = []
+trainData_labelAll = []
+testData_labelAll = []
+
+# for removal of punctuation words
+table = str.maketrans({key: None for key in string.punctuation})
+
+
+label = []
+labelAll = []
+
+tfs = {}      # term frequency
+tfidf = {}    # term frequency Inverse document frequency
+
+tfs_test = {}    # term frequency for test data
+tfidf_test = {}  # term frequency Inverse document frequency for test data
+
+featureDict = {}         # A global dictionary of features
+featureDict_test = {}    # A global dictionary of All features
+
+
+df = pd.read_csv(r"E:\dataset\PRODUCTREVIEWS200.csv", encoding='Latin-1')
+df = df.sample(frac=1).reset_index(drop=True)
+
+# Replace the Labels with FAKE and REAL
+df = df.replace({'LABEL': {'__label1__':'FAKE' , '__label2__':'REAL'}})
+
+
+label=df['LABEL'].tolist()
+
+# label list for all as feature
+labelAll=df['LABEL'].tolist()
+
+# Drop the LABEL
+df=df.drop('LABEL',axis=1)
+row,col = df.shape
+
+dataset=list(df.values)
+
+count_real=0
+count_fake=0
+for x in label:
+  if x == 'REAL':
+    count_real +=1
+  else:
+    count_fake +=1
+
+count_rf=[count_real,count_fake] 
+# Data to plot
+labelss = 'REAL', 'FAKE'
+labelss1=count_real,count_fake
+
+colors = ['lightskyblue','yellowgreen']
+explode = (0.1, 0)  # explode 1st slice
+ 
+
+plt.pie(count_rf, explode=explode, labels=labelss1, colors=colors,autopct='%1.1f%%', shadow=True, startangle=140)
+plt.axis('equal')
+plt.legend(labelss)
+plt.tight_layout()
+plt.show()
+
+#Function for Parsing Only Review Text
+def parse(review):
+    return (review[7])
+
+#Function for Parsing Rating, Verified Purchase, Product Category, Review Title and Review Text
+def parseAll(review):
+  return (review[1],review[2],review[3],review[6],review[7])
+
+#TEXT PREPROCESSING 1. STOP WORDS REMOVAL 2. REMOVING PUNCTUATIONS 3. LEMMATIZING
+def preprocess(text):
+    lemmatizer = WordNetLemmatizer()
+    
+    lemmatized_tokens = []
+    stop_words = set(stopwords.words('english'))
+    text = text.translate(table)           # translation of text is done here punctuations are replaced with none
+    for w in text.split(" "):
+        if w not in stop_words:
+            lemmatized_tokens.append(lemmatizer.lemmatize(w.lower()))
+      
+    return lemmatized_tokens #lemmatized_tokens  #filtered_tokens
+
+#COUNT OF TOKENS IN THE TEXT
+def bow(Text):
+  
+    bowCount = len(Text)
+    
+    return bowCount
+
+#FUNCTION COMPUTING TERM FREQUENCY TF FOR EACH DOCUMENT
+def computeTF(localDict, bowCount):
+    
+    tfDict = {}
+    for word, count in localDict.items():
+        tfDict[word] = count/float(bowCount)
+    
+    return tfDict
+
+#FUNCTION FOR COMPUTING THE INVERSE-DOCUMENT FREQUENCY IDF WITH RESPECT TO WHOLE DATA WHICH IS PASSED
+def computeIDF(docList):
+   
+    idfDict = {}
+    #print(docList)
+    N = row ## row
+    #display(N)
+    
+    idfDict = dict.fromkeys(docList[0].keys(), 0)
+    for doc in docList:
+      for key, value in doc.items():
+        
+        if value > 0:
+          idfDict[key] += 1
+              #print(idfDict)
+   
+    for word, val in idfDict.items():
+      idfDict[word] = math.log10(N / float(val))
+   
+    return idfDict
+
+#FUNCTION FOR COMPUTING THE TERM FREQUENCY INVERSE-DOCUMENT FREQUENCY TF-IDF FOR EACH DOCUMENT
+# FOR TRAINING DATASET
+
+def TFIDF(tfs, idfs): 
+    
+  for key,val in tfs.items():
+    t={}
+    for k,v in val.items():
+       t[k]=v*idfs[k]
+    tfidf[key] = t
+     
+  return tfidf
+
+# FOR TEST DATASET
+  
+def TFIDF_test(tfs_test, idfs_t): 
+  
+  for key,val in tfs_test.items():
+    t1={}
+    for k,v in val.items():
+       t1[k]=v*idfs_t[k]
+    tfidf_test[key] = t1
+    
+  return tfidf_test
+
+#FUNCTION FOR CONVERTING IN TO VECTOR
+# FOR TRAINING DATASET
+
+def toFeatureVector(tokens):
+    localDict = {}
+    for token in tokens:
+        if token not in featureDict:
+            featureDict[token] = 1
+        else:
+            featureDict[token] += 1
+   
+        if token not in localDict:
+            localDict[token] = 1
+        else:
+            localDict[token] += 1
+        
+    return localDict
+  
+# FOR TEST DATASET
+
+def toFeatureVector_test(tokens1):
+    localDict1 = {}
+    for token1 in tokens1:
+        if token1 not in featureDict_test:
+            featureDict_test[token1] = 1
+        else:
+            featureDict_test[token1] += 1
+   
+        if token1 not in localDict1:
+            localDict1[token1] = 1
+        else:
+            localDict1[token1] += 1
+    
+    return localDict1
+
+#FUNCTION CALLED FOR COMPUTING TF-IDF VLAUE FOR DOCUMENTS
+# FOR TRAINING DATASET
+
+def tfidf_compute(dataset1):
+  length=len(dataset1)
+  for i in range(length):
+      Text = parse(dataset1[i])
+      temp={}
+      temp={i:computeTF(toFeatureVector(preprocess(Text)),bow(preprocess(Text)))}
+      tfs.update(temp)
+
+  idfs = computeIDF([featureDict])
+  tfidfs = TFIDF(tfs, idfs)
+  return tfidfs
+
+# FOR TEST DATASET
+
+def tfidf_compute_test(dataset2):
+  length1=len(dataset2)
+  for j in range(length1):
+      Text1 = parse(dataset2[j])
+      temp1={}
+      temp1={j:computeTF(toFeatureVector_test(preprocess(Text1)),bow(preprocess(Text1)))}
+      tfs_test.update(temp1)
+
+  idfs_t = computeIDF([featureDict_test])
+  tfidfs_test = TFIDF_test(tfs_test, idfs_t)
+  return tfidfs_test
+
+#FUNCTION CALLED FOR COMPUTING TF-IDF VLAUE FOR DOCUMENTS WITH ALL TAKEN AS FEATURES
+# FOR TRAINING DATASET
+
+def tfidf_computeAll(dataset1):
+  length=len(dataset1)
+  for i in range(length):
+      R,VP,PC,Title,Text = parseAll(dataset1[i])
+      temp={}
+      temp={i:computeTF(toFeatureVector(preprocess(f'{R} {VP} {PC} {Title} {Text}')),bow(preprocess(f'{R} {VP} {PC} {Title} {Text}')))}
+      tfs.update(temp)
+
+  idfs = computeIDF([featureDict])
+  tfidfs = TFIDF(tfs, idfs)
+  return tfidfs
+
+# FOR TEST DATASET
+
+def tfidf_compute_testAll(dataset2):
+  length1=len(dataset2)
+  for j in range(length1):
+      R,VP,PC,Title,Text = parseAll(dataset2[j])
+      temp1={}
+      temp1={j:computeTF(toFeatureVector_test(preprocess(f'{R} {VP} {PC} {Title} {Text}')),bow(preprocess(f'{R} {VP} {PC} {Title} {Text}')))}
+      tfs_test.update(temp1)
+
+  idfs_t = computeIDF([featureDict_test])
+  tfidfs_test = TFIDF_test(tfs_test, idfs_t)
+  return tfidfs_test
+
+#SPLITTING DATASET INTO DESIRED PERCENTAGE OF TRAIN AND TEST DATASET
+def split(percent):
+    dataSamples = len(dataset)
+    halfOfData = int(len(dataset)/2)
+    trainingSamples = int((percent*dataSamples)/2)
+    
+    # TRAIN data here
+  
+    x1=dataset[:trainingSamples] + dataset[halfOfData:halfOfData+trainingSamples]
+    # calling tfidf_compute
+    train_tfidf = tfidf_compute(x1)
+  
+    for m,n in train_tfidf.items():
+      # appending tfidf value (n) to the documents into trainData which is a list
+      trainData.append((n))
+    
+   
+    for x in label[:trainingSamples]+label[halfOfData:halfOfData+trainingSamples]:
+      # appending Labels of data in to another list 
+      trainData_label.append(x)
+    
+    # TEST data here
+    
+    x2=dataset[trainingSamples:halfOfData] + dataset[halfOfData+trainingSamples:]
+    test_tfidf = tfidf_compute_test(x2)
+    
+   
+    for m_t,n_t in test_tfidf.items():
+      testData.append((n_t))
+    
+   
+    for y in label[trainingSamples:halfOfData] + label[halfOfData+trainingSamples:]:
+      testData_label.append(y)
+      
+      #SPLITTING DATASET IN TO TRAIN AND TEST DATASET FOR ALL THE FEATURES
+def splitAll(percent):
+  
+    dataSamplesAll = len(dataset)
+    halfOfDataAll = int(len(dataset)/2)
+    trainingSamplesAll = int((percent*dataSamplesAll)/2)
+    
+    # TRAIN Data here  
+  
+    x11 = dataset[:trainingSamplesAll] + dataset[halfOfDataAll:halfOfDataAll+trainingSamplesAll]
+    train_tfidf = tfidf_computeAll(x11)
+    for m11,n11 in train_tfidf.items():
+      trainDataAll.append((n11))
+    
+   
+    for x in labelAll[:trainingSamplesAll]+labelAll[halfOfDataAll:halfOfDataAll+trainingSamplesAll]:
+      trainData_labelAll.append(x)
+    
+    # TEST Data here
+    
+    x22 = dataset[trainingSamplesAll:halfOfDataAll] + dataset[halfOfDataAll+trainingSamplesAll:]
+    test_tfidf = tfidf_compute_testAll(x22)
+    
+   
+    for m_t11,n_t11 in test_tfidf.items():
+      testDataAll.append((n_t11))
+    
+   
+    for y in labelAll[trainingSamplesAll:halfOfDataAll] + labelAll[halfOfDataAll+trainingSamplesAll:]:
+      testData_labelAll.append(y)
+      
+      #TRAINING CLASSIFIER FUNCTION USING LINEAR SVM
+def trainClassifier(trainclassifier):
+  
+    print("Training Classifier")
+    pipeline =  Pipeline([('svc', LinearSVC())])
+    
+    return SklearnClassifier(pipeline).train(trainclassifier)
+
+
+def crossValidate(dataset_cv, folds):
+  
+    cv_results = []
+    
+    # Each fold's Size of the dataset
+    
+    foldSize = int(len(dataset_cv)/folds)
+    
+    for i in range(0,len(dataset_cv),foldSize):
+      
+        # Training classifier for each foldsize traing set
+        classifier = trainClassifier(dataset_cv[:i]+dataset_cv[foldSize+i:])
+        
+        # Predicting for the specified test set for the foldsize
+        y_pred = predictLabels(dataset_cv[i:i+foldSize],classifier)
+        
+        # Measuring accuracy for test set
+        a = accuracy_score(list(map(lambda d : d[1], dataset_cv[i:i+foldSize])), y_pred)
+        
+        # Measuring Precision ,Recall, F1-Score 
+        (p,r,f,_) = precision_recall_fscore_support(list(map(lambda d : d[1], dataset_cv[i:i+foldSize])), y_pred, average ='macro')
+        cv_results.append((a,p,r,f))
+    cv_results = (np.mean(np.array(cv_results),axis=0))
+    return cv_results
+
+#FUNCTION FOR PREDICTING LABELS FOR TEST SET
+
+def predictLabels(reviewSamples, classifier1):
+  
+    # in-line function to map featue to classifier
+    # Only keeping the features and not taking the labels to the classifier
+    # t[0]
+    
+    return classifier1.classify_many(map(lambda t: t[0], reviewSamples))
+
+#SPLIT FUNCTION IS CALLED FOR ONLY REVIEW AS FEATURE
+split(0.80)
+
+#TRAIN DATA AND TEST DATA
+# np.c_ is used to take both data and label as input together
+
+TRAIN_MAIN_DATA = np.c_[trainData,trainData_label]
+TEST_MAIN_DATA = np.c_[testData,testData_label]
+
+# converting train and test set in to list form as desired input to classifier is in list form
+
+TRAIN_MAIN_DATA = TRAIN_MAIN_DATA.tolist()
+TEST_MAIN_DATA = TEST_MAIN_DATA.tolist()
+
+#CROSS-VALIDATE CALLED FOR ONLY REVIEW AS A FEATURE
+print("Mean of cross-validations (Accuracy, Precision, Recall, Fscore): ", crossValidate(TRAIN_MAIN_DATA, 10))
+
+
+## Test Accuracy
+classifier = trainClassifier(TRAIN_MAIN_DATA)
+predictions = predictLabels(TEST_MAIN_DATA, classifier)
+true_labels = list(map(lambda d: d[1], TEST_MAIN_DATA))
+a = accuracy_score(true_labels, predictions)
+p, r, f1, _ = precision_recall_fscore_support(true_labels, predictions, average='macro')
+print("accuracy: ", a)
+print("Precision: ", p)
+print("Recall: ", r)
+print("f1-score: ", f1)
+
+#SPLIT FUNCTION CALLED FOR ALL AS FEATURE
+splitAll(0.80)
+
+#TRAIN AND TEST FOR ALL FEATURE
+# np.c_ is used to concatenate data and label as input together for classifier
+
+
+TRAIN_MAIN_DATA_All=np.c_[trainDataAll,trainData_labelAll]
+TEST_MAIN_DATA_All=np.c_[testDataAll,testData_labelAll]
+
+# converting train and test set in to list form as desired input to classifier is in list form
+
+TRAIN_MAIN_DATA_All=TRAIN_MAIN_DATA_All.tolist()
+TEST_MAIN_DATA_All=TEST_MAIN_DATA_All.tolist()
+
+#CROSS-VALIDATE CALLED FOR ALL AS FEATURE
+CV_RES = crossValidate(TRAIN_MAIN_DATA_All, 10)
+print("Mean of cross-validations (Accuracy, Precision, Recall, Fscore): ",CV_RES )
+
+#VISUALIZATION OF CROSS-VALIDATION WITH 10 FOLDS
+objects = ('Accuracy', 'Precision', 'Recall', 'F1_score')
+
+performance = CV_RES
+bar_width=0.3
+rects1 = plt.bar(objects, performance,bar_width ,alpha=0.8,color='b',)
+ 
+plt.xticks(objects, objects)
+plt.ylabel('Score')
+plt.title('Evaluation of 10 fold Cross Validation on Training Dataset ')
+
+
+plt.show()
+
+## Test Accuracy
+classifier_All = trainClassifier(TRAIN_MAIN_DATA_All)
+predictions_All = predictLabels(TEST_MAIN_DATA_All, classifier_All)
+true_labels_All = list(map(lambda d: d[1], TEST_MAIN_DATA_All))
+a_All = accuracy_score(true_labels_All, predictions_All)
+p_All, r_All, f1_All, _ = precision_recall_fscore_support(true_labels_All, predictions_All, average='macro')
+print("accuracy: ", a_All)
+print("Precision: ", p_All)
+print("Recall: ", r_All)
+print("f1-score: ", f1_All)
+
+
+
+#predi = classifier_All.predictLabels(TEST_MAIN_DATA_All)
+
+#print('ROC-AUC yields ' + str(roc_auc_score(true_labels_All, predi[:,1])))
+TEST_RES = [a_All,p_All,r_All,f1_All]
+
+objects = ('Accuracy', 'Precision', 'Recall', 'F1_score')
+
+performance = TEST_RES
+bar_width=0.3
+rects1 = plt.bar(objects, performance,bar_width ,alpha=0.8,color='b',)
+ 
+
+plt.xticks(objects, objects)
+plt.ylabel('Score')
+plt.title('Evaluation of Test Data ')
+
+
+plt.show()
+end_time = datetime.now()
+print('Duration: {}'.format(end_time - start_time))
